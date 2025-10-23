@@ -1,18 +1,13 @@
 //menu_filter.js
 /*
-  Lampa Menu Filter — v1.2 (2025-10-24)
+  Lampa Menu Filter — v1.3 (2025-10-24)
   ЦЕЛЬ: Работать ТОЛЬКО с ЛЕВЫМ БОКОВЫМ МЕНЮ.
   • Оставить и упорядочить пункты ровно так:
       Главная → Поиск → История → Избранное/Закладки → Каталог → Фильтр → Фильмы → Сериалы → Релизы
   • Все остальные пункты левого меню скрыть.
-  • «Поиск» сделать рабочим и фокусируемым; если его нет — добавить.
-  • «Избранное» и «Закладки» считаются одним и тем же пунктом (любой из вариантов, если присутствует).
+  • «Поиск» сделать фокусируемым и кликабельным: сперва как штатный элемент (data-action="search"),
+    затем надёжные фолбэки (клик по кнопке поиска, Controller.toggle, keydown Slash).
   • Поддержка ru/en алиасов, пересборки DOM (MutationObserver).
-
-  ПОДКЛЮЧЕНИЕ:
-  1) Подними HTTP-сервер в папке с файлом (пример):  python3 -m http.server 8000
-  2) В Lampa → Настройки → Расширения/Plugins → Добавить плагин → http://<IP>:8000/menu_filter.js
-  3) Полностью перезапусти Lampa.
 */
 
 (function(){
@@ -36,7 +31,7 @@
     'Главная'   : ['Главная','Home'],
     'Поиск'     : ['Поиск','Search'],
     'История'   : ['История','History','Recently watched'],
-    'Избранное' : ['Избранное','Закладки','Favorites','Bookmarks','Favs'],
+    'Избранное' : ['Избранное','Закладки','Коллекции','Favorites','Bookmarks','Favs'],
     'Каталог'   : ['Каталог','Library','Catalog','Browse'],
     'Фильтр'    : ['Фильтр','Filter'],
     'Фильмы'    : ['Фильмы','Movies','HD Фильмы','Films'],
@@ -84,35 +79,59 @@
     return canonical;
   }
 
+  // Надёжный вызов поиска (цепочка вариантов)
+  function invokeSearch(){
+    // 1) Клик по существующей системной кнопке поиска (если она есть в DOM)
+    const btnSelectors = ['[data-action="search"]', '.head__action--search', '.head__search'];
+    for (const s of btnSelectors){
+      const b = document.querySelector(s);
+      if (b && typeof b.click === 'function'){
+        b.click();
+        return true;
+      }
+    }
+    // 2) Попытка вызвать контроллер
+    try {
+      if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.toggle === 'function'){
+        Lampa.Controller.toggle('search');
+        return true;
+      }
+      if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.call === 'function'){
+        Lampa.Controller.call('search');
+        return true;
+      }
+    } catch(e){}
+    // 3) Бэкап: сгенерировать нажатие Slash
+    try{
+      const ev = new KeyboardEvent('keydown', { key:'/', code:'Slash', bubbles:true });
+      document.dispatchEvent(ev);
+      return true;
+    }catch(e){}
+    return false;
+  }
+
   // Создать фокусируемый элемент «Поиск» (если его нет в меню)
   function createSearchItem(){
     const el = document.createElement('div');
-    // Классы под Lampa: делаем фокусируемым и совместимым с навигацией пульта
+    // Важно: класс selector + data-action="search" — чтобы штатная делегация обработчиков в Lampa сработала
     el.className = 'menu__item selector focusable menu-filter__search';
     el.setAttribute('tabindex','0');
+    el.setAttribute('role','button');
+    el.setAttribute('data-action','search');
     el.innerHTML = '<div class="menu__ico">🔍</div><div class="menu__text">Поиск</div>';
 
-    const openSearch = ()=>{
-      // 1) Клик по системной кнопке поиска в шапке (если такая есть)
-      const headBtn = document.querySelector('.head__search, .head__action--search, [data-action="search"]');
-      if (headBtn && typeof headBtn.click === 'function'){ headBtn.click(); return; }
-      // 2) Попробовать вызвать контроллер поиска
-      try {
-        if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.toggle === 'function'){
-          Lampa.Controller.toggle('search');
-          return;
-        }
-      } catch(e){}
-      // 3) Бэкап — сгенерировать клавишу "/"
-      const ev = new KeyboardEvent('keydown', { key:'/', code:'Slash', bubbles:true });
-      document.dispatchEvent(ev);
-    };
+    // На некоторых сборках делегация может отсутствовать — подстрахуемся своими обработчиками
+    el.addEventListener('click', function(){
+      // сначала пробуем штатный путь — клик уже прошёл; если сборка не ловит, дергаем цепочку вручную
+      setTimeout(()=>{ invokeSearch(); }, 0);
+    });
 
-    el.addEventListener('click', openSearch);
-    el.addEventListener('keydown', (e)=>{
+    el.addEventListener('keydown', function(e){
       if (e.key === 'Enter' || e.key === 'OK' || e.keyCode === 13){
         e.preventDefault();
-        openSearch();
+        // отправим click по самому элементу (для делегата), а затем, на всякий случай, вызовем фолбэки
+        if (typeof el.click === 'function') el.click();
+        setTimeout(()=>{ invokeSearch(); }, 0);
       }
     });
 
@@ -142,6 +161,26 @@
 
       // Сохраняем первый встретившийся DOM-элемент для этого канонического ключа
       if (!present[canonical]) present[canonical] = el;
+
+      // Если это «Поиск», убедимся, что он имеет нужные классы/атрибуты для делегатов
+      if (norm(canonical) === norm('Поиск')){
+        el.classList.add('selector','focusable');
+        el.setAttribute('tabindex','0');
+        el.setAttribute('role','button');
+        el.setAttribute('data-action','search');
+        // подстраховка на старых сборках
+        if (!el._menu_filter_bound){
+          el.addEventListener('click', ()=>{ setTimeout(()=>{ invokeSearch(); }, 0); });
+          el.addEventListener('keydown', (e)=>{
+            if (e.key === 'Enter' || e.key === 'OK' || e.keyCode === 13){
+              e.preventDefault();
+              if (typeof el.click === 'function') el.click();
+              setTimeout(()=>{ invokeSearch(); }, 0);
+            }
+          });
+          el._menu_filter_bound = true;
+        }
+      }
     }
 
     // Выстраиваем согласно WHITELIST_ORDER
@@ -158,7 +197,6 @@
 
     // Если «Поиск» отсутствовал — добавляем его в нужное место (по позиции в WHITELIST_ORDER)
     if (!hasSearch){
-      // Сформируем список узлов в соответствии с текущим фрагментом
       const nodes = Array.from(frag.childNodes);
       const searchIdx = WHITELIST_ORDER.findIndex(x => norm(x) === norm('Поиск'));
       const searchNode = createSearchItem();
