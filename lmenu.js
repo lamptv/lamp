@@ -1,12 +1,16 @@
 //menu_filter.js
 /*
-  Lampa Menu Filter — v1.4 (2025-01-24)
+  Lampa Menu Filter — v1.4 (2025-10-24)
   ЦЕЛЬ: Работать ТОЛЬКО с ЛЕВЫМ БОКОВЫМ МЕНЮ.
   • Оставить и упорядочить пункты ровно так:
-      Главная → Поиск → История → Коллекции → Каталог → Фильтр → Фильмы → Сериалы → Релизы
+      Главная → Каталог → История → Закладки → Нравится → Позже → Фильтр → Фильмы → Сериалы → Релизы
   • Все остальные пункты левого меню скрыть.
-  • «Поиск» сделать фокусируемым и кликабельным.
-  • Поддержка ru/en алиасов, пересборки DOM (MutationObserver).
+  • Поддержка ru/en алиасов, эквивалентов (например, «Закладки» ⇄ «Избранное»), пересборки DOM (MutationObserver).
+
+  ПОДКЛЮЧЕНИЕ:
+  1) Подними HTTP-сервер в папке с файлом (пример):  python3 -m http.server 8000
+  2) В Lampa → Настройки → Расширения/Plugins → Добавить плагин → http://<IP>:8000/menu_filter.js
+  3) Полностью перезапусти Lampa.
 */
 
 (function(){
@@ -15,10 +19,11 @@
   /*** === КОНФИГ: желаемый порядок ЛЕВОГО МЕНЮ === ***/
   const WHITELIST_ORDER = [
     'Главная',
-    'Поиск', 
-    'История',
-    'Коллекции',
     'Каталог',
+    'История',
+    'Закладки',   // эквивалент «Избранное»
+    'Нравится',   // эквивалент «Понравившиеся»
+    'Позже',      // эквивалент «Смотреть позже»
     'Фильтр',
     'Фильмы',
     'Сериалы',
@@ -27,15 +32,23 @@
 
   /*** Алиасы: распознаём подписи в разных локалях/сборках ***/
   const ALIASES = {
-    'Главная'   : ['Главная','Home','Main'],
-    'Поиск'     : ['Поиск','Search'],
-    'История'   : ['История','History','Recently watched'],
-    'Коллекции' : ['Коллекции','Collections','Подборки','Library'],
+    'Главная'   : ['Главная','Home'],
     'Каталог'   : ['Каталог','Library','Catalog','Browse'],
-    'Фильтр'    : ['Фильтр','Filter','Filters'],
-    'Фильмы'    : ['Фильмы','Movies','HD Фильмы','Films','Movie'],
-    'Сериалы'   : ['Сериалы','Series','TV Shows','TV'],
-    'Релизы'    : ['Релизы','Releases','HD Релизы','HD Releases','New']
+    'История'   : ['История','History','Recently watched','Watch history','Recents'],
+    'Закладки'  : ['Закладки','Избранное','Favorites','Bookmarks','Favs','Favourites'],
+    'Нравится'  : ['Нравится','Понравившиеся','Liked','Likes'],
+    'Позже'     : ['Позже','Смотреть позже','Watch later','Later'],
+    'Фильтр'    : ['Фильтр','Filter'],
+    'Фильмы'    : ['Фильмы','Movies','Films','HD Фильмы'],
+    'Сериалы'   : ['Сериалы','Series','TV Shows'],
+    'Релизы'    : ['Релизы','Releases','HD Релизы','HD Releases']
+  };
+
+  // Группы эквивалентов (ключ — каноническое имя, значения — синонимы, которые надо «схлопнуть» в ключ)
+  const EQUIVALENT_KEYS = {
+    'Закладки': ['Закладки','Избранное'],
+    'Нравится': ['Нравится','Понравившиеся'],
+    'Позже'   : ['Позже','Смотреть позже']
   };
 
   // Селекторы ЛЕВОГО МЕНЮ
@@ -49,12 +62,23 @@
     const n = norm(label);
     for (const key in ALIASES){
       const arr = ALIASES[key];
+      // точное совпадение с алиасами
       for (let i=0;i<arr.length;i++){
         if (norm(arr[i]) === n) return key;
       }
+      // совпадение с самим ключом
       if (norm(key) === n) return key;
     }
     return null;
+  }
+
+  function collapseEquivalent(canonical){
+    if (!canonical) return null;
+    for (const mainKey in EQUIVALENT_KEYS){
+      const list = EQUIVALENT_KEYS[mainKey];
+      if (list.some(k => norm(k) === norm(canonical))) return mainKey;
+    }
+    return canonical;
   }
 
   function isInWhitelist(canonical){
@@ -62,272 +86,69 @@
     return WHITELIST_ORDER.some(w => norm(w) === norm(canonical));
   }
 
-  // Улучшенный вызов поиска с приоритетами
-  function invokeSearch(){
-    console.log('MenuFilter: Opening search...');
-    
-    // 1) Попробовать через Lampa API если доступно
-    try {
-      if (window.Lampa && Lampa.Controller) {
-        if (typeof Lampa.Controller.toggle === 'function') {
-          Lampa.Controller.toggle('search');
-          return true;
-        }
-        if (typeof Lampa.Controller.call === 'function') {
-          Lampa.Controller.call('search');
-          return true;
-        }
-      }
-      
-      // Альтернативные пути через Lampa
-      if (window.Lampa && Lampa.search && typeof Lampa.search.open === 'function') {
-        Lampa.search.open();
-        return true;
-      }
-      
-      if (window.Lampa && Lampa.app && Lampa.app.header && typeof Lampa.app.header.search === 'function') {
-        Lampa.app.header.search();
-        return true;
-      }
-      
-      if (window.Lampa && Lampa.router) {
-        Lampa.router.navigate('search');
-        return true;
-      }
-    } catch(e) {
-      console.log('MenuFilter: Lampa API search failed', e);
-    }
-
-    // 2) Клик по существующей системной кнопке поиска
-    const btnSelectors = [
-      '[data-action="search"]',
-      '.head__action--search', 
-      '.head__search',
-      '.header .search',
-      '.search-button',
-      '.icon-search',
-      'button[onclick*="search"]',
-      'button[onclick*="Search"]'
-    ];
-    
-    for (const selector of btnSelectors){
-      const button = document.querySelector(selector);
-      if (button && typeof button.click === 'function'){
-        button.click();
-        console.log('MenuFilter: Clicked search button via selector:', selector);
-        return true;
-      }
-    }
-
-    // 3) Событие для открытия поиска
-    try {
-      const searchEvent = new CustomEvent('lampa-search-open', { bubbles: true });
-      document.dispatchEvent(searchEvent);
-      window.dispatchEvent(searchEvent);
-      console.log('MenuFilter: Dispatched search event');
-      
-      // Дадим время на обработку события
-      setTimeout(() => {
-        // Проверим, не появилось ли модальное окно поиска
-        const searchModal = document.querySelector('.search, .search-modal, [class*="search"]');
-        if (!searchModal) {
-          // 4) Бэкап: сгенерировать нажатие Slash
-          const keyEvent = new KeyboardEvent('keydown', { 
-            key: '/', 
-            code: 'Slash', 
-            keyCode: 191,
-            bubbles: true,
-            cancelable: true
-          });
-          document.dispatchEvent(keyEvent);
-          console.log('MenuFilter: Dispatched Slash key event');
-        }
-      }, 100);
-      
-      return true;
-    } catch(e) {
-      console.log('MenuFilter: Event dispatch failed', e);
-    }
-
-    return false;
-  }
-
-  // Создать фокусируемый элемент «Поиск»
-  function createSearchItem(){
-    const el = document.createElement('div');
-    el.className = 'menu__item selector focusable menu-filter__search';
-    el.setAttribute('tabindex', '0');
-    el.setAttribute('role', 'button');
-    el.setAttribute('data-action', 'search');
-    el.innerHTML = '<div class="menu__ico">🔍</div><div class="menu__text">Поиск</div>';
-
-    // Обработчики для поиска
-    const handleSearch = function(e) {
-      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.keyCode !== 13 && e.keyCode !== 32) {
-        return;
-      }
-      
-      if (e.type === 'keydown') {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      
-      console.log('MenuFilter: Search item activated');
-      
-      // Сначала дадим время на обработку стандартных обработчиков Lampa
-      setTimeout(() => {
-        invokeSearch();
-      }, 50);
-    };
-
-    el.addEventListener('click', handleSearch);
-    el.addEventListener('keydown', handleSearch);
-
-    return el;
-  }
-
-  // Обновить существующий элемент поиска
-  function updateSearchItem(el){
-    if (!el._menu_filter_bound) {
-      el.classList.add('selector', 'focusable', 'menu-filter__search');
-      el.setAttribute('tabindex', '0');
-      el.setAttribute('role', 'button');
-      el.setAttribute('data-action', 'search');
-      
-      const handleSearch = function(e) {
-        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.keyCode !== 13 && e.keyCode !== 32) {
-          return;
-        }
-        
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-        
-        console.log('MenuFilter: Existing search item activated');
-        
-        setTimeout(() => {
-          invokeSearch();
-        }, 50);
-      };
-
-      // Удаляем старые обработчики если были
-      el.removeEventListener('click', handleSearch);
-      el.removeEventListener('keydown', handleSearch);
-      
-      // Добавляем новые
-      el.addEventListener('click', handleSearch);
-      el.addEventListener('keydown', handleSearch);
-      
-      el._menu_filter_bound = true;
-    }
-    return el;
-  }
-
   function applyMenuFilter(root){
     if (!root) return;
 
+    // Собираем текущие пункты
     const items = Array.from(root.querySelectorAll(MENU_ITEM_SELECTOR));
-    const present = {};
-    let hasSearch = false;
 
-    // Первый проход: собираем нужные пункты
+    // Карта: canonicalCollapsed -> DOM-элемент (берём первый подходящий)
+    const present = Object.create(null);
+
     for (const el of items){
       const labelNode = el.querySelector('.menu__text') || el;
       const label = labelNode ? labelNode.textContent : '';
-      const canonical = canonicalFromLabel(label);
+      let canonical = canonicalFromLabel(label);
+      canonical = collapseEquivalent(canonical);
 
+      // Если не из списка — удаляем
       if (!canonical || !isInWhitelist(canonical)){
         el.remove();
         continue;
       }
 
-      if (norm(canonical) === norm('Поиск')) {
-        hasSearch = true;
-        present[canonical] = updateSearchItem(el);
-      } else {
-        present[canonical] = el;
-      }
+      if (!present[canonical]) present[canonical] = el;
     }
 
-    // Создаем новый порядок
+    // Выстраиваем согласно WHITELIST_ORDER
     const frag = document.createDocumentFragment();
-    
+
     for (const desired of WHITELIST_ORDER){
-      const node = present[desired];
-      
-      if (node) {
-        frag.appendChild(node);
-      } else if (norm(desired) === norm('Поиск') && !hasSearch) {
-        // Создаем поиск если его нет
-        const searchNode = createSearchItem();
-        frag.appendChild(searchNode);
-        hasSearch = true;
-      }
+      const collapsed = collapseEquivalent(desired) || desired;
+      const node = present[collapsed];
+      if (node) frag.appendChild(node);
     }
 
-    // Применяем новый порядок
+    // Перерисовываем левое меню
     root.innerHTML = '';
     root.appendChild(frag);
-    
-    console.log('MenuFilter: Menu filtered successfully');
   }
 
   function init(){
     let tries = 0;
-    const maxTries = 200; // ~20 секунд
-    
-    const checkMenu = function() {
+    const iv = setInterval(()=>{
       const root = document.querySelector(MENU_LIST_SELECTOR);
       tries++;
 
       if (root){
-        try { 
-          applyMenuFilter(root); 
-          
-          // Наблюдаем за изменениями в меню
-          const observer = new MutationObserver(function(mutations) {
-            let shouldUpdate = false;
-            for (const mutation of mutations) {
-              if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                shouldUpdate = true;
-                break;
-              }
-            }
-            if (shouldUpdate) {
-              setTimeout(() => {
-                try { applyMenuFilter(root); } catch(e) {
-                  console.error('MenuFilter: Observer error', e);
-                }
-              }, 100);
-            }
-          });
-          
-          observer.observe(root, { childList: true, subtree: false });
-          
-          console.log('MenuFilter: Plugin initialized successfully');
-        } catch(e) {
-          console.error('MenuFilter: Initial filter error', e);
-        }
-        return true;
+        clearInterval(iv);
+        try { applyMenuFilter(root); } catch(e){}
+
+        // Наблюдаем за пересборкой меню
+        const mo = new MutationObserver(()=>{
+          if (init._t) clearTimeout(init._t);
+          init._t = setTimeout(()=>{ try{ applyMenuFilter(root); }catch(e){} }, 60);
+        });
+        mo.observe(root, { childList:true });
       }
 
-      if (tries < maxTries) {
-        setTimeout(checkMenu, 100);
-      } else {
-        console.error('MenuFilter: Menu not found after', maxTries, 'tries');
+      if (tries > 200){ // ~20 секунд ожидания
+        clearInterval(iv);
       }
-    };
-
-    // Запускаем проверку
-    setTimeout(checkMenu, 100);
+    }, 100);
   }
 
-  // Запуск плагина
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') init();
+  else document.addEventListener('DOMContentLoaded', init);
 
 })();
