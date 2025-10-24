@@ -1,214 +1,333 @@
-// Lampa plugin: menu_filter.js
-// Фильтрация пунктов левого меню с добавлением поиска
-(function() {
-    'use strict';
+//menu_filter.js
+/*
+  Lampa Menu Filter — v1.4 (2025-01-24)
+  ЦЕЛЬ: Работать ТОЛЬКО с ЛЕВЫМ БОКОВЫМ МЕНЮ.
+  • Оставить и упорядочить пункты ровно так:
+      Главная → Поиск → История → Коллекции → Каталог → Фильтр → Фильмы → Сериалы → Релизы
+  • Все остальные пункты левого меню скрыть.
+  • «Поиск» сделать фокусируемым и кликабельным.
+  • Поддержка ru/en алиасов, пересборки DOM (MutationObserver).
+*/
+
+(function(){
+  'use strict';
+
+  /*** === КОНФИГ: желаемый порядок ЛЕВОГО МЕНЮ === ***/
+  const WHITELIST_ORDER = [
+    'Главная',
+    'Поиск', 
+    'История',
+    'Коллекции',
+    'Каталог',
+    'Фильтр',
+    'Фильмы',
+    'Сериалы',
+    'Релизы'
+  ];
+
+  /*** Алиасы: распознаём подписи в разных локалях/сборках ***/
+  const ALIASES = {
+    'Главная'   : ['Главная','Home','Main'],
+    'Поиск'     : ['Поиск','Search'],
+    'История'   : ['История','History','Recently watched'],
+    'Коллекции' : ['Коллекции','Collections','Подборки','Library'],
+    'Каталог'   : ['Каталог','Library','Catalog','Browse'],
+    'Фильтр'    : ['Фильтр','Filter','Filters'],
+    'Фильмы'    : ['Фильмы','Movies','HD Фильмы','Films','Movie'],
+    'Сериалы'   : ['Сериалы','Series','TV Shows','TV'],
+    'Релизы'    : ['Релизы','Releases','HD Релизы','HD Releases','New']
+  };
+
+  // Селекторы ЛЕВОГО МЕНЮ
+  const MENU_LIST_SELECTOR = '.menu__list';
+  const MENU_ITEM_SELECTOR = '.menu__item, .menu__list > *';
+
+  // Утилиты
+  const norm = s => (s ? String(s).trim().toLowerCase() : '');
+
+  function canonicalFromLabel(label){
+    const n = norm(label);
+    for (const key in ALIASES){
+      const arr = ALIASES[key];
+      for (let i=0;i<arr.length;i++){
+        if (norm(arr[i]) === n) return key;
+      }
+      if (norm(key) === n) return key;
+    }
+    return null;
+  }
+
+  function isInWhitelist(canonical){
+    if (!canonical) return false;
+    return WHITELIST_ORDER.some(w => norm(w) === norm(canonical));
+  }
+
+  // Улучшенный вызов поиска с приоритетами
+  function invokeSearch(){
+    console.log('MenuFilter: Opening search...');
     
-    // Белый список пунктов меню (в нужном порядке)
-    const WHITE_LIST = [
-        'Главная',   // существует
-        'Поиск',     // нужно создать и привязать действие
-        'История',   // существует
-        'Коллекции', // существует
-        'Каталог',   // существует
-        'Фильтр',    // существует
-        'Фильмы',    // существует
-        'Сериалы',   // существует
-        'Релизы'     // существует
+    // 1) Попробовать через Lampa API если доступно
+    try {
+      if (window.Lampa && Lampa.Controller) {
+        if (typeof Lampa.Controller.toggle === 'function') {
+          Lampa.Controller.toggle('search');
+          return true;
+        }
+        if (typeof Lampa.Controller.call === 'function') {
+          Lampa.Controller.call('search');
+          return true;
+        }
+      }
+      
+      // Альтернативные пути через Lampa
+      if (window.Lampa && Lampa.search && typeof Lampa.search.open === 'function') {
+        Lampa.search.open();
+        return true;
+      }
+      
+      if (window.Lampa && Lampa.app && Lampa.app.header && typeof Lampa.app.header.search === 'function') {
+        Lampa.app.header.search();
+        return true;
+      }
+      
+      if (window.Lampa && Lampa.router) {
+        Lampa.router.navigate('search');
+        return true;
+      }
+    } catch(e) {
+      console.log('MenuFilter: Lampa API search failed', e);
+    }
+
+    // 2) Клик по существующей системной кнопке поиска
+    const btnSelectors = [
+      '[data-action="search"]',
+      '.head__action--search', 
+      '.head__search',
+      '.header .search',
+      '.search-button',
+      '.icon-search',
+      'button[onclick*="search"]',
+      'button[onclick*="Search"]'
     ];
     
-    // Сопоставление ключей с различными названиями
-    const MENU_ITEMS_MAP = {
-        'Главная': ['главная', 'home', 'main', 'начало'],
-        'Поиск': ['поиск', 'search', 'искать', 'найти'],
-        'История': ['история', 'history', 'последние', 'недавние'],
-        'Коллекции': ['коллекции', 'collections', 'подборки', 'collection'],
-        'Каталог': ['каталог', 'catalog', 'категории', 'categories'],
-        'Фильтр': ['фильтр', 'filter', 'фильтрация', 'filters'],
-        'Фильмы': ['фильмы', 'movies', 'кино', 'films', 'movie'],
-        'Сериалы': ['сериалы', 'tv', 'series', 'телесериалы', 'serial'],
-        'Релизы': ['релизы', 'releases', 'новинки', 'новые']
+    for (const selector of btnSelectors){
+      const button = document.querySelector(selector);
+      if (button && typeof button.click === 'function'){
+        button.click();
+        console.log('MenuFilter: Clicked search button via selector:', selector);
+        return true;
+      }
+    }
+
+    // 3) Событие для открытия поиска
+    try {
+      const searchEvent = new CustomEvent('lampa-search-open', { bubbles: true });
+      document.dispatchEvent(searchEvent);
+      window.dispatchEvent(searchEvent);
+      console.log('MenuFilter: Dispatched search event');
+      
+      // Дадим время на обработку события
+      setTimeout(() => {
+        // Проверим, не появилось ли модальное окно поиска
+        const searchModal = document.querySelector('.search, .search-modal, [class*="search"]');
+        if (!searchModal) {
+          // 4) Бэкап: сгенерировать нажатие Slash
+          const keyEvent = new KeyboardEvent('keydown', { 
+            key: '/', 
+            code: 'Slash', 
+            keyCode: 191,
+            bubbles: true,
+            cancelable: true
+          });
+          document.dispatchEvent(keyEvent);
+          console.log('MenuFilter: Dispatched Slash key event');
+        }
+      }, 100);
+      
+      return true;
+    } catch(e) {
+      console.log('MenuFilter: Event dispatch failed', e);
+    }
+
+    return false;
+  }
+
+  // Создать фокусируемый элемент «Поиск»
+  function createSearchItem(){
+    const el = document.createElement('div');
+    el.className = 'menu__item selector focusable menu-filter__search';
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('role', 'button');
+    el.setAttribute('data-action', 'search');
+    el.innerHTML = '<div class="menu__ico">🔍</div><div class="menu__text">Поиск</div>';
+
+    // Обработчики для поиска
+    const handleSearch = function(e) {
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.keyCode !== 13 && e.keyCode !== 32) {
+        return;
+      }
+      
+      if (e.type === 'keydown') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      
+      console.log('MenuFilter: Search item activated');
+      
+      // Сначала дадим время на обработку стандартных обработчиков Lampa
+      setTimeout(() => {
+        invokeSearch();
+      }, 50);
     };
-    
-    let applied = false;
-    
-    function createSearchMenuItem() {
-        return {
-            id: 'search',
-            name: 'Поиск',
-            icon: 'search',
-            component: 'search',
-            on_click: function() {
-                openSearch();
-            }
-        };
-    }
-    
-    function openSearch() {
-        try {
-            // Способ 1: через глобальные методы Lampa
-            if (window.lampa && window.lampa.search) {
-                if (typeof window.lampa.search.open === 'function') {
-                    window.lampa.search.open();
-                    return;
-                }
-            }
-            
-            // Способ 2: через компонент хедера
-            if (window.lampa && window.lampa.app && window.lampa.app.header) {
-                if (typeof window.lampa.app.header.search === 'function') {
-                    window.lampa.app.header.search();
-                    return;
-                }
-            }
-            
-            // Способ 3: через событие
-            const searchEvent = new Event('lampa-search-open');
-            window.dispatchEvent(searchEvent);
-            
-            // Способ 4: пытаемся найти кнопку поиска в DOM и кликнуть
-            setTimeout(() => {
-                const searchButtons = document.querySelectorAll([
-                    '.header .search',
-                    '.header [onclick*="search"]',
-                    '.header [data-action="search"]',
-                    '.icon-search',
-                    '.search-icon'
-                ].join(','));
-                
-                if (searchButtons.length > 0) {
-                    searchButtons[0].click();
-                } else {
-                    // Если кнопка не найдена, пробуем открыть через роутинг
-                    if (window.lampa && window.lampa.router) {
-                        window.lampa.router.navigate('search');
-                    }
-                }
-            }, 100);
-            
-        } catch (error) {
-            console.error('Lampa menu_filter: Ошибка при открытии поиска', error);
-        }
-    }
-    
-    function initializePlugin() {
-        if (applied) return;
-        
-        // Ищем объект меню в различных возможных местах
-        const menuTargets = [
-            window.lampa?.app?.left_menu?.items,
-            window.lampa?.left_menu?.items,
-            window.app?.left_menu?.items,
-            window.lampa?.menus?.left?.items
-        ];
-        
-        for (let target of menuTargets) {
-            if (target && Array.isArray(target)) {
-                patchMenuArray(target);
-                applied = true;
-                console.log('Lampa menu_filter: Меню успешно отфильтровано');
-                break;
-            }
+
+    el.addEventListener('click', handleSearch);
+    el.addEventListener('keydown', handleSearch);
+
+    return el;
+  }
+
+  // Обновить существующий элемент поиска
+  function updateSearchItem(el){
+    if (!el._menu_filter_bound) {
+      el.classList.add('selector', 'focusable', 'menu-filter__search');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('role', 'button');
+      el.setAttribute('data-action', 'search');
+      
+      const handleSearch = function(e) {
+        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ' && e.keyCode !== 13 && e.keyCode !== 32) {
+          return;
         }
         
-        // Дублирующая проверка через секунду на случай динамической загрузки
+        if (e.type === 'keydown') {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        
+        console.log('MenuFilter: Existing search item activated');
+        
         setTimeout(() => {
-            if (!applied) {
-                const delayedTarget = window.lampa?.app?.left_menu?.items;
-                if (delayedTarget && Array.isArray(delayedTarget)) {
-                    patchMenuArray(delayedTarget);
-                    applied = true;
-                }
-            }
-        }, 1000);
+          invokeSearch();
+        }, 50);
+      };
+
+      // Удаляем старые обработчики если были
+      el.removeEventListener('click', handleSearch);
+      el.removeEventListener('keydown', handleSearch);
+      
+      // Добавляем новые
+      el.addEventListener('click', handleSearch);
+      el.addEventListener('keydown', handleSearch);
+      
+      el._menu_filter_bound = true;
     }
-    
-    function patchMenuArray(menuArray) {
-        if (!menuArray || !menuArray.length) return;
-        
-        // Создаем карту для быстрого поиска по ключам/названиям
-        const menuMap = new Map();
-        
-        // Сначала собираем все пункты в карту
-        menuArray.forEach((item, index) => {
-            if (!item) return;
-            
-            const key = findItemKey(item);
-            if (key) {
-                menuMap.set(key, item);
-            }
-        });
-        
-        // Фильтруем и упорядочиваем согласно белому списку
-        const filteredMenu = [];
-        
-        WHITE_LIST.forEach(key => {
-            if (key === 'Поиск') {
-                // Добавляем кастомный пункт поиска
-                const searchItem = createSearchMenuItem();
-                filteredMenu.push(searchItem);
-            } else {
-                const menuItem = menuMap.get(key);
-                if (menuItem) {
-                    filteredMenu.push(menuItem);
-                }
-            }
-        });
-        
-        // Очищаем оригинальный массив и добавляем отфильтрованные пункты
-        menuArray.length = 0;
-        filteredMenu.forEach(item => menuArray.push(item));
+    return el;
+  }
+
+  function applyMenuFilter(root){
+    if (!root) return;
+
+    const items = Array.from(root.querySelectorAll(MENU_ITEM_SELECTOR));
+    const present = {};
+    let hasSearch = false;
+
+    // Первый проход: собираем нужные пункты
+    for (const el of items){
+      const labelNode = el.querySelector('.menu__text') || el;
+      const label = labelNode ? labelNode.textContent : '';
+      const canonical = canonicalFromLabel(label);
+
+      if (!canonical || !isInWhitelist(canonical)){
+        el.remove();
+        continue;
+      }
+
+      if (norm(canonical) === norm('Поиск')) {
+        hasSearch = true;
+        present[canonical] = updateSearchItem(el);
+      } else {
+        present[canonical] = el;
+      }
     }
+
+    // Создаем новый порядок
+    const frag = document.createDocumentFragment();
     
-    function findItemKey(menuItem) {
-        if (!menuItem) return null;
-        
-        // Пробуем получить ключ из различных свойств
-        const possibleKeys = [
-            menuItem.id,
-            menuItem.name,
-            menuItem.component,
-            menuItem.key,
-            menuItem.title
-        ];
-        
-        for (let key of possibleKeys) {
-            if (!key) continue;
-            
-            const keyStr = String(key).toLowerCase();
-            
-            // Ищем совпадение в нашей карте MENU_ITEMS_MAP
-            for (let [validKey, aliases] of Object.entries(MENU_ITEMS_MAP)) {
-                if (aliases.some(alias => keyStr.includes(alias.toLowerCase()))) {
-                    return validKey;
-                }
+    for (const desired of WHITELIST_ORDER){
+      const node = present[desired];
+      
+      if (node) {
+        frag.appendChild(node);
+      } else if (norm(desired) === norm('Поиск') && !hasSearch) {
+        // Создаем поиск если его нет
+        const searchNode = createSearchItem();
+        frag.appendChild(searchNode);
+        hasSearch = true;
+      }
+    }
+
+    // Применяем новый порядок
+    root.innerHTML = '';
+    root.appendChild(frag);
+    
+    console.log('MenuFilter: Menu filtered successfully');
+  }
+
+  function init(){
+    let tries = 0;
+    const maxTries = 200; // ~20 секунд
+    
+    const checkMenu = function() {
+      const root = document.querySelector(MENU_LIST_SELECTOR);
+      tries++;
+
+      if (root){
+        try { 
+          applyMenuFilter(root); 
+          
+          // Наблюдаем за изменениями в меню
+          const observer = new MutationObserver(function(mutations) {
+            let shouldUpdate = false;
+            for (const mutation of mutations) {
+              if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                shouldUpdate = true;
+                break;
+              }
             }
+            if (shouldUpdate) {
+              setTimeout(() => {
+                try { applyMenuFilter(root); } catch(e) {
+                  console.error('MenuFilter: Observer error', e);
+                }
+              }, 100);
+            }
+          });
+          
+          observer.observe(root, { childList: true, subtree: false });
+          
+          console.log('MenuFilter: Plugin initialized successfully');
+        } catch(e) {
+          console.error('MenuFilter: Initial filter error', e);
         }
-        
-        return null;
-    }
-    
-    // Запускаем плагин когда Lampa загружена
-    if (window.lampa) {
-        initializePlugin();
-    } else {
-        window.addEventListener('lampa-loaded', initializePlugin);
-    }
-    
-    // Дополнительная инициализация при полной загрузке страницы
-    document.addEventListener('DOMContentLoaded', initializePlugin);
-    
-    // Экспортируем функции для ручного управления при необходимости
-    window.lampaMenuFilter = {
-        reapply: initializePlugin,
-        getWhiteList: () => [...WHITE_LIST],
-        setWhiteList: (newList) => {
-            WHITE_LIST.length = 0;
-            WHITE_LIST.push(...newList);
-            initializePlugin();
-        },
-        openSearch: openSearch
+        return true;
+      }
+
+      if (tries < maxTries) {
+        setTimeout(checkMenu, 100);
+      } else {
+        console.error('MenuFilter: Menu not found after', maxTries, 'tries');
+      }
     };
-    
-    console.log('Lampa menu_filter: Плагин загружен и ожидает инициализации');
-    
+
+    // Запускаем проверку
+    setTimeout(checkMenu, 100);
+  }
+
+  // Запуск плагина
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
 })();
