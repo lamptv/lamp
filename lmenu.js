@@ -1,15 +1,15 @@
 //menu_filter.js
 /*
-  Lampa Menu Filter — v1.7 (2025-10-24)
+  Lampa Menu Filter — v1.8 (2025-10-24)
   ТОЛЬКО ЛЕВОЕ БОКОВОЕ МЕНЮ.
 
-  Шаги (в одном плагине, строго по просьбе пользователя):
-    1) СНАЧАЛА — БЕЗ ИЗМЕНЕНИЙ вставляем рабочий плагин добавления пунктов:
+  Что делает:
+    1) СНАЧАЛА — БЕЗ ИЗМЕНЕНИЙ вставляет рабочие кнопки:
        «Позже» (favorite/wath), «Нравится» (favorite/like), «Закладки» (favorite/book).
-    2) ПОТОМ — лёгкая одноразовая фильтрация и упорядочивание левого меню:
-       Главная → Каталог → История → Закладки → Нравится → Позже → Фильтр → Фильмы → Сериалы → Релизы
-       Остальные пункты удаляются.
-    3) НИКАКИХ тяжёлых наблюдателей и бесконечных перестроек. Только 2 мягких прохода по таймеру.
+    2) ПОТОМ — лёгко и одноразово фильтрует и упорядочивает левое меню строго так:
+       Каталог → История → Закладки → Нравится → Позже → Фильтр → Фильмы → Сериалы → Релизы
+       (Пункт «Главная» полностью убран как ненужный.)
+    3) НИКАКИХ тяжёлых наблюдателей — только 2 мягких прохода по таймеру, чтобы закрепить порядок.
 
   Подключение: добавьте этот файл как плагин по URL в Lampa.
 */
@@ -50,7 +50,7 @@
           });
           $('.menu .menu__list').eq(0).append(button_like);
 
-          var button_book = $("<li class=\"menu__item selector\">\n            <div class=\"menu__ico\">\n                <svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" x=\"0\" y=\"0\" viewBox=\"0 0 512 512\" xml:space=\"preserve\"><path fill=\"#fff\" d=\"M391.416 0H120.584c-17.778 0-32.242 14.464-32.242 32.242v460.413A19.345 19.345 0 00107.687 512a19.34 19.34 0 0010.169-2.882l138.182-85.312 138.163 84.693a19.307 19.307 0 0019.564.387 19.338 19.338 0 009.892-16.875V32.242C423.657 14.464 409.194 0 391.416 0zm-6.449 457.453л-118.85-72.86a19.361 19.361 0 00-20.28.032л-118.805 73.35V38.69h257.935v418.763z\"/></svg>\n            </div>\n            <div class=\"menu__text\">".concat(Lampa.Lang.translate('title_book'), "</div>\n        </li>"));
+          var button_book = $("<li class=\"menu__item selector\">\n            <div class=\"menu__ico\">\n                <svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" x=\"0\" y=\"0\" viewBox=\"0 0 512 512\" xml:space=\"preserve\"><path fill=\"#fff\" d=\"M391.416 0H120.584c-17.778 0-32.242 14.464-32.242 32.242v460.413A19.345 19.345 0 00107.687 512a19.34 19.34 0 0010.169-2.882l138.182-85.312 138.163 84.693a19.307 19.307 0 0019.564.387 19.338 19.338 0 009.892-16.875V32.242C423.657 14.464 409.194 0 391.416 0zm-6.449 457.453л-118.85-72.86a19.361 19.361 0 00-20.28.032л-118.805 73.35V38.69h257.935v418.763з\"/></svg>\n            </div>\n            <div class=\"menu__text\">".concat(Lampa.Lang.translate('title_book'), "</div>\n        </li>"));
           button_book.on('hover:enter', function () {        
             Lampa.Activity.push({
               url: '',
@@ -77,9 +77,8 @@
 
   /*** === ЧАСТЬ 2. Лёгкая одноразовая фильтрация и упорядочивание левого меню === ***/
 
-  // Желаемый порядок
+  // Итоговый порядок (БЕЗ «Главная»)
   const ORDER = [
-    'Главная',
     'Каталог',
     'История',
     'Закладки',  // = «Избранное»
@@ -93,7 +92,6 @@
 
   // Алиасы для распознавания подписей (ru/en)
   const ALIASES = {
-    'Главная'  : ['Главная','Home'],
     'Каталог'  : ['Каталог','Library','Catalog','Browse'],
     'История'  : ['История','History','Recently watched','Watch history','Recents'],
     'Закладки' : ['Закладки','Избранное','Favorites','Bookmarks','Favs','Favourites'],
@@ -105,16 +103,16 @@
     'Релизы'   : ['Релизы','Releases','HD Релизы','HD Releases']
   };
 
-  // Учитываем текущие переводы Lampa для «Позже/Нравится/Закладки», чтобы распознать именно эти пункты
+  // Подмешиваем текущие переводы Lampa, чтобы распознавать наши добавленные пункты
   function withRuntimeAliases(){
     try{
       const t = (k,f)=>{ try{ const s=Lampa.Lang.translate(k)||''; return s.trim()||f; }catch(e){return f;} };
       const tw = t('title_wath','Позже');
       const tl = t('title_like','Нравится');
       const tb = t('title_book','Закладки');
-      if (ALIASES['Позже'].indexOf(tw)  <0) ALIASES['Позже'].push(tw);
-      if (ALIASES['Нравится'].indexOf(tl)<0) ALIASES['Нравится'].push(tl);
-      if (ALIASES['Закладки'].indexOf(tb)<0) ALIASES['Закладки'].push(tb);
+      if (!ALIASES['Позже'].includes(tw))    ALIASES['Позже'].push(tw);
+      if (!ALIASES['Нравится'].includes(tl)) ALIASES['Нравится'].push(tl);
+      if (!ALIASES['Закладки'].includes(tb)) ALIASES['Закладки'].push(tb);
     }catch(e){}
   }
 
@@ -142,32 +140,27 @@
       const items = Array.from(root.children);
       const keepMap = Object.create(null);
 
-      // Пройдёмся по текущим пунктам и оставим только те, что в ORDER
+      // Убираем всё лишнее, оставляем только то, что в ORDER
       for (const el of items){
         const labelNode = el.querySelector('.menu__text') || el;
         const label = labelNode ? labelNode.textContent : '';
         const canonical = toCanonical(label);
         if (!canonical || ORDER.every(o => norm(o)!==norm(canonical))){
-          // удалить лишнее
           el.remove();
           continue;
         }
-        if (!keepMap[canonical]) keepMap[canonical] = el; // сохраняем первый найденный
+        if (!keepMap[canonical]) keepMap[canonical] = el;
       }
 
-      // Перестановка по заданному порядку (без innerHTML = '')
+      // Выставляем точный порядок. Без innerHTML='', только ре-append (перемещение узла).
       for (const name of ORDER){
         const node = keepMap[name];
-        if (node){
-          // если узел уже в нужном месте — append его просто переместит в конец; нам важна последовательность,
-          // поэтому добавляем по порядку — это сформирует точный порядок.
-          root.appendChild(node);
-        }
+        if (node) root.appendChild(node);
       }
     }catch(e){}
   }
 
-  // Два лёгких прохода: после готовности приложения и повтор через 1200 мс (чтобы поймать поздние вставки)
+  // Два лёгких прохода: сразу после готовности и ещё раз через 1200 мс (на случай «поздних» вставок)
   function kick(){
     filterOnce();
     setTimeout(filterOnce, 1200);
@@ -178,14 +171,12 @@
     if (window.appready) kick();
     else if (window.Lampa && Lampa.Listener && typeof Lampa.Listener.follow==='function'){
       Lampa.Listener.follow('app', function (e) { if (e.type === 'ready') kick(); });
-      // страховка, если событие уже прошло
-      setTimeout(kick, 1500);
+      setTimeout(kick, 1500); // страховка, если событие уже прошло
     } else {
       if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(kick, 600);
       else document.addEventListener('DOMContentLoaded', ()=>setTimeout(kick,600));
     }
   }catch(e){
-    // на всякий — последний фолбэк
     setTimeout(kick, 1200);
   }
 
